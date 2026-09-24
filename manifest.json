@@ -1,0 +1,27 @@
+{
+  "id": "engine-hopper",
+  "name": "引擎接力",
+  "version": "0.1.0",
+  "minAppVersion": "1.0.10",
+  "sdkVersion": "^0.3.16",
+  "author": "wszbest68-gif",
+  "description": "在同一对话中随时切换引擎与模型：自动整理完整对话上下文并智能分层交接，新引擎无缝续聊；支持接力链回跳与增量续接。",
+  "repo": "wszbest68-gif/ccgui-plugin-engine-hopper",
+  "license": "MIT",
+  "keywords": ["engine", "model", "switch", "handoff", "relay", "引擎", "切换", "接力"],
+  "tier": "js",
+  "permissions": [
+    "storage",
+    "events",
+    "host:session",
+    "host:models",
+    "agent",
+    "exec:node",
+    "ui:composer-status",
+    "ui:panel-tab",
+    "ui:settings-section",
+    "ui:command",
+    "ui:status-bar",
+    "i18n"
+  ]
+}
