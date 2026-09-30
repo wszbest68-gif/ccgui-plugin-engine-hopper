@@ -352,6 +352,7 @@ class HopStore {
       error: "",
       notice: "",
       current: null,      // {engine, sessionId}
+      workspace: "",      // 最近已知工作区路径（面板挂载时由宿主注入）
       running: {},        // sessionKey -> true（有未完成 run）
       engines: [],        // [{id,name,available,enabled,models:[{id,name}]}]
       catalogError: "",
@@ -390,9 +391,13 @@ class HopStore {
     } catch (e) {
       this.set({ error: String(e && e.message || e) });
     }
-    await this.refreshCatalog();
     await this.detectDb();
+    await this.refreshCatalog();
     this.set({ loaded: true });
+  }
+
+  setWorkspace(ws) {
+    if (typeof ws === "string" && ws && ws !== this.state.workspace) this.set({ workspace: ws });
   }
 
   async detectDb() {
@@ -422,25 +427,30 @@ class HopStore {
     return JSON.parse(r.stdout);
   }
 
-  async refreshCatalog() {
+  /**
+   * 引擎/模型目录：走官方契约 ctx.agent.catalog（agent 权限，SDK 0.3.14 起）。
+   * agent.catalog 只返回已启用引擎；条目形状 { engine, label, available, providers[], models[] }。
+   * workspace 为空字符串时由宿主按本地工作区解析；失败只记录 catalogError，不影响其他功能。
+   */
+  async refreshCatalog(workspacePath) {
     try {
-      const res = await this.ctx.models.catalog({ refreshProviders: false });
+      const ws = typeof workspacePath === "string" && workspacePath ? workspacePath : (this.state.workspace || "");
+      const list = await this.ctx.agent.catalog(ws);
       const engines = [];
-      for (const g of (res && res.engines) || []) {
+      for (const e of (Array.isArray(list) ? list : [])) {
+        if (!e || typeof e.engine !== "string" || !e.engine) continue;
         const seen = new Set();
         const models = [];
-        for (const src of g.sources || []) {
-          for (const m of src.models || []) {
-            if (!m || typeof m.id !== "string" || !m.id || seen.has(m.id)) continue;
-            seen.add(m.id);
-            models.push({ id: m.id, name: m.name || m.id });
-          }
+        for (const m of (e.models || [])) {
+          if (!m || typeof m.id !== "string" || !m.id || seen.has(m.id)) continue;
+          seen.add(m.id);
+          models.push({ id: m.id, name: m.label || m.id });
         }
         engines.push({
-          id: g.engine.id,
-          name: g.engine.name || g.engine.id,
-          available: g.engine.available !== false,
-          enabled: g.engine.enabled !== false,
+          id: e.engine,
+          name: e.label || e.engine,
+          available: e.available !== false,
+          enabled: true,
           models,
         });
       }
@@ -674,6 +684,13 @@ function ChipView(ctx, store, t) {
     const [resume, setResume] = R.useState("existing");
     const [mode, setMode] = R.useState("layered");
 
+    const toggleOpen = () => {
+      const next = !open;
+      setOpen(next);
+      // 目录为空时兜底拉取（例如面板尚未挂载、init 时宿主目录尚未就绪）
+      if (next && store.getSnapshot().engines.length === 0) void store.refreshCatalog();
+    };
+
     const usable = s.engines.filter((e) => e.available && e.enabled);
     const cur = s.current;
     const target = usable.find((e) => e.id === engineId) || null;
@@ -759,7 +776,7 @@ function ChipView(ctx, store, t) {
         type: "button",
         className: "eh-chip" + (s.busy ? " eh-chip-busy" : ""),
         title: t.chipTitle,
-        onClick: () => setOpen(!open),
+        onClick: toggleOpen,
       }, "⇄ " + t.chip + (s.chain ? " ×" + s.chain.hops.length : "")),
       pop);
   };
@@ -767,8 +784,15 @@ function ChipView(ctx, store, t) {
 
 function PanelView(ctx, store, t) {
   const R = ctx.react;
-  return function Panel() {
+  return function Panel(props) {
+    const workspacePath = props && typeof props.workspacePath === "string" ? props.workspacePath : "";
     const s = R.useSyncExternalStore(store.subscribe, store.getSnapshot);
+    R.useEffect(() => {
+      if (!workspacePath) return;
+      store.setWorkspace(workspacePath);
+      // 面板挂载即取得真实工作区路径：目录为空时用它重新拉取引擎/模型目录
+      if (store.getSnapshot().engines.length === 0) void store.refreshCatalog(workspacePath);
+    }, [workspacePath]);
     const ch = s.chain;
     const cur = s.current;
     return R.createElement("div", { className: "eh-panel" },

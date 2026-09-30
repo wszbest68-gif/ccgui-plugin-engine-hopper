@@ -1,6 +1,6 @@
 {
   "name": "ccgui-plugin-engine-hopper",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "description": "CC GUI 跨引擎接力插件：同一对话中切换引擎与模型，完整上下文无缝续聊。",
   "type": "module",
