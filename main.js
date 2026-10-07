@@ -29,6 +29,8 @@ const ZH = {
   busyExtract: "正在读取对话记录…",
   busyStart: "正在启动新引擎会话…",
   busyJump: "正在跳转…",
+  busyWait: "会话已启动，正在定位并跳转…",
+  advToggle: "高级选项",
   errNeedSession: "未识别当前会话，无法接力。",
   errSameEngine: "目标引擎与当前相同；同引擎换模型请直接用输入框上方宿主选择器，历史天然连续。",
   errEngineDown: "目标引擎不可用或未启用。",
@@ -84,6 +86,8 @@ const EN = {
   busyExtract: "Reading conversation…",
   busyStart: "Starting session on new engine…",
   busyJump: "Jumping…",
+  busyWait: "Session started; locating and jumping…",
+  advToggle: "Advanced",
   errNeedSession: "Current session unknown; cannot hop.",
   errSameEngine: "Same engine. For model-only changes use the host composer selector; history continues natively.",
   errEngineDown: "Target engine unavailable or disabled.",
@@ -327,7 +331,14 @@ const HELPER_JS = [
   "  for(let i=0;i<pairs.length;i++){data.push({engine:pairs[i][0],sessionId:pairs[i][1],data:readSession(db,pairs[i][0],pairs[i][1])});}",
   "  out({ok:true,data:data});",
   "  try{db.close();}catch(e){}",
-  "}else fail('unknown mode: '+mode);",
+  "}else if(mode==='latest'){",
+"  const db=openDb(process.argv[2]);",
+"  const eng=process.argv[3],since=Number(process.argv[4])||0,marker=process.argv[5]||'';",
+"  let row=null;",
+"  try{row=db.prepare('SELECT session_id,title,created_at FROM sessions WHERE engine=? AND created_at>=? AND title LIKE ? ORDER BY created_at DESC LIMIT 1').get(eng,since,marker+'%')||null;}catch(e){}",
+"  out({ok:true,session:row});",
+"  try{db.close();}catch(e){}",
+"}else fail('unknown mode: '+mode);",
 ].join("\n");
 
 /* ============================== store ============================== */
@@ -574,6 +585,7 @@ class HopStore {
       });
 
       this.set({ busy: "start" });
+      const hopStart = Date.now();
       const run = await this.ctx.agent.start({
         engine: target.engine,
         prompt,
@@ -581,7 +593,20 @@ class HopStore {
         model: target.model || undefined,
         sessionId: useExisting ? existing.hop.sessionId : undefined,
       });
-      const newSid = run && run.sessionId ? run.sessionId : (useExisting ? existing.hop.sessionId : "");
+      let newSid = run && run.sessionId ? run.sessionId : (useExisting ? existing.hop.sessionId : "");
+      if (!newSid && !useExisting) {
+        // 宿主契约（v1.1.1）：agent.start 返回 {runId, sessionId|null}，会话为异步创建。
+        // 回退路径：轮询 app.db，按交接消息稳定前缀找回新会话 id 后自动跳转。
+        this.set({ busy: "wait" });
+        const deadline = Date.now() + 45000;
+        while (!newSid && !this.disposed && Date.now() < deadline) {
+          await sleep(2000);
+          try {
+            const r2 = await this.runHelper(["latest", db, target.engine, String(hopStart - 5000), MARKER]);
+            if (r2 && r2.session && r2.session.session_id) newSid = r2.session.session_id;
+          } catch (e) { /* 单轮失败继续轮询 */ }
+        }
+      }
 
       // 记账：链与日志
       const now = Date.now();
@@ -663,6 +688,8 @@ class HopStore {
   }
 }
 
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
 function errText(e) {
   return e instanceof Error ? e.message : String(e);
 }
@@ -683,6 +710,7 @@ function ChipView(ctx, store, t) {
     const [modelId, setModelId] = R.useState("");
     const [resume, setResume] = R.useState("existing");
     const [mode, setMode] = R.useState("layered");
+    const [adv, setAdv] = R.useState(false);
 
     const toggleOpen = () => {
       const next = !open;
@@ -695,7 +723,7 @@ function ChipView(ctx, store, t) {
     const cur = s.current;
     const target = usable.find((e) => e.id === engineId) || null;
     const existing = engineId ? store.hopForEngine(engineId) : null;
-    const busyText = s.busy === "extract" ? t.busyExtract : s.busy === "start" ? t.busyStart : s.busy === "jump" ? t.busyJump : "";
+    const busyText = s.busy === "extract" ? t.busyExtract : s.busy === "start" ? t.busyStart : s.busy === "wait" ? t.busyWait : s.busy === "jump" ? t.busyJump : "";
 
     R.useEffect(() => {
       if (open && !engineId && cur) {
@@ -732,7 +760,12 @@ function ChipView(ctx, store, t) {
           !engineId ? R.createElement("option", { value: "" }, "—") : null,
           usable.map((e) => R.createElement("option", { key: e.id, value: e.id },
             e.name + " (" + e.models.length + ")" + (cur && e.id === cur.engine ? " ·" : ""))))),
-      target ? R.createElement("div", { className: "eh-row" },
+      R.createElement("button", {
+        type: "button",
+        className: "eh-adv-toggle",
+        onClick: () => setAdv(!adv),
+      }, (adv ? "▾ " : "▸ ") + t.advToggle),
+      adv && target ? R.createElement("div", { className: "eh-row" },
         R.createElement("label", null, t.targetModel),
         R.createElement("select", {
           className: "eh-select",
@@ -741,7 +774,7 @@ function ChipView(ctx, store, t) {
         },
           R.createElement("option", { value: "" }, t.modelDefault),
           target.models.map((m) => R.createElement("option", { key: m.id, value: m.id }, m.name)))) : null,
-      existing ? R.createElement("div", { className: "eh-row" },
+      adv && existing ? R.createElement("div", { className: "eh-row" },
         R.createElement("label", null, t.resumeTitle),
         R.createElement("label", { className: "eh-radio" },
           R.createElement("input", { type: "radio", checked: resume === "existing", onChange: () => setResume("existing") }),
@@ -749,14 +782,14 @@ function ChipView(ctx, store, t) {
         R.createElement("label", { className: "eh-radio" },
           R.createElement("input", { type: "radio", checked: resume === "new", onChange: () => setResume("new") }),
           t.resumeNew)) : null,
-      R.createElement("div", { className: "eh-row" },
+      adv ? R.createElement("div", { className: "eh-row" },
         R.createElement("label", null, t.modeTitle),
         R.createElement("label", { className: "eh-radio" },
           R.createElement("input", { type: "radio", checked: mode === "layered", onChange: () => setMode("layered") }),
           t.modeLayered),
         R.createElement("label", { className: "eh-radio" },
           R.createElement("input", { type: "radio", checked: mode === "full", onChange: () => setMode("full") }),
-          t.modeFull)),
+          t.modeFull)) : null,
       cur && target && target.id === cur.engine ? R.createElement("p", { className: "eh-note" }, t.sameEngineHint) : null,
       s.error ? R.createElement("p", { className: "eh-error", role: "alert" }, s.error) : null,
       s.notice ? R.createElement("p", { className: "eh-ok" }, s.notice) : null,

@@ -1,7 +1,7 @@
 {
   "id": "engine-hopper",
   "name": "引擎接力",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "minAppVersion": "1.0.9",
   "sdkVersion": "^0.3.14",
   "author": "wszbest68-gif",

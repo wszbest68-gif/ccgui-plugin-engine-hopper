@@ -40,3 +40,5 @@
 .eh-check{display:flex;align-items:center;gap:6px;cursor:pointer}
 .eh-status{border:1px solid var(--color-separator-border,rgba(127,127,127,.3));border-radius:6px;background:var(--color-background-secondary-default,transparent);color:var(--color-text-secondary,inherit);font:inherit;font-size:12px;padding:1px 7px;cursor:pointer}
 .eh-status:hover{background:var(--color-background-tertiary-hover,rgba(127,127,127,.12))}
+.eh-adv-toggle{align-self:flex-start;border:none;background:none;padding:0;font:inherit;font-size:12px;color:var(--color-text-tertiary,inherit);cursor:pointer}
+.eh-adv-toggle:hover{color:var(--color-text-primary,inherit);text-decoration:underline}
